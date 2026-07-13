@@ -34,3 +34,17 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+
+## AI Integration Layer
+
+We have implemented the full backend AI services and API routes for the Personal Knowledge Operating System under `/lib/ai/` and `/app/api/`.
+
+### Subsystems Implemented
+1. **Ingestion & Preprocessing Pipeline**: Handles page-preserving PDF extraction, image Vision OCR & descriptions, and audio/video Whisper transcriptions. Performs recursive character chunking and embeddings generation with an index cache.
+2. **RAG-based Retrieval**: Dynamic multi-tenant scoped searches on Qdrant, featuring term-frequency hybrid boosting, and LLM-based re-ranking.
+3. **Context-Aware Memory**: Dual-tier memory featuring short-term session context (retrieved from Supabase) and long-term user facts synthesis (deduplicated via vector search and stored in Qdrant).
+4. **Summarization & Revision Notes**: Map-reduce long document summaries and strictly grounded study notes/flashcard generator with Supabase caching.
+5. **Streaming Chat Route**: End-to-end context-aware streaming endpoint (`/api/chat`) implementing token budgeting.
+
+For complete developer details, architecture, data flow diagrams, and extension guidelines, see the [AI Integration Layer README](file:///e:/drishti/internship/AI-Operating-System/lib/ai/README.md).
+

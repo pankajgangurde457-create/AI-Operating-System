@@ -1,77 +1,70 @@
 import { NextResponse } from "next/server";
-import { PDFLoader } from "@langchain/community/document_loaders/fs/pdf";
-import { RecursiveCharacterTextSplitter } from "langchain/text_splitter";
-import { PineconeStore } from "@langchain/pinecone";
-import { embeddingsModel } from "@/lib/openai";
-import { getPineconeIndex } from "@/lib/pinecone";
-import { createClient } from "@/lib/supabase/server";
+import { runIngestionPipeline } from "@/lib/ai/ingestion/pipeline";
+import { createClient } from "@supabase/supabase-js";
 
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+const supabaseServiceRole = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
+const supabaseAdmin = createClient(supabaseUrl, supabaseServiceRole);
+
+/**
+ * Next.js API Route Handler to trigger the Ingestion Pipeline.
+ * Expects a JSON payload containing the Supabase Storage file reference and user metadata.
+ * Runs the processing pipeline asynchronously.
+ */
 export async function POST(req: Request) {
   try {
-    const formData = await req.formData();
-    const file = formData.get("file") as File;
+    const body = await req.json();
+    const { fileId, userId, storagePath, mimeType, fileName } = body;
 
-    if (!file) {
-      return NextResponse.json({ error: "No file provided" }, { status: 400 });
+    // Validate parameters
+    if (!fileId || !userId || !storagePath || !mimeType || !fileName) {
+      return NextResponse.json(
+        { error: "Missing required parameters: fileId, userId, storagePath, mimeType, fileName" },
+        { status: 400 }
+      );
     }
 
-    // Initialize Supabase to get the user ID and track the upload
-    const supabase = createClient();
-    // const { data: { user } } = await supabase.auth.getUser();
-    // if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    // Assert that the file metadata record exists in the files table
+    const { data: fileRecord, error: fileError } = await supabaseAdmin
+      .from("files")
+      .select("id")
+      .eq("id", fileId)
+      .maybeSingle();
 
-    // Note: For this demo without real auth, we will skip the user check.
-    // In production, uncomment the auth check above.
+    if (fileError || !fileRecord) {
+      // If the file row doesn't exist, create it so status updates can be tracked
+      await supabaseAdmin.from("files").insert({
+        id: fileId,
+        user_id: userId,
+        file_name: fileName,
+        file_type: mimeType,
+        storage_path: storagePath,
+        status: "pending"
+      });
+    }
 
-    // 1. Convert File to Blob and parse it using LangChain PDFLoader
-    const blob = new Blob([await file.arrayBuffer()], { type: file.type });
-    const loader = new PDFLoader(blob, {
-      splitPages: false,
+    // Trigger the ingestion pipeline in the background
+    runIngestionPipeline({
+      fileId,
+      userId,
+      storagePath,
+      mimeType,
+      fileName
+    }).catch(err => {
+      console.error(`[Background Ingestion Error] File ID ${fileId}:`, err);
     });
-    const docs = await loader.load();
-
-    // 2. Split the document into smaller semantic chunks
-    const textSplitter = new RecursiveCharacterTextSplitter({
-      chunkSize: 1000,
-      chunkOverlap: 200,
-    });
-    const splitDocs = await textSplitter.splitDocuments(docs);
-
-    // Add metadata to the chunks so we can trace citations later
-    const docsWithMetadata = splitDocs.map((doc, index) => {
-      doc.metadata = {
-        ...doc.metadata,
-        fileName: file.name,
-        chunkId: index,
-        // userId: user.id
-      };
-      return doc;
-    });
-
-    // 3. Generate embeddings and store them in Pinecone
-    const pineconeIndex = getPineconeIndex();
-    await PineconeStore.fromDocuments(docsWithMetadata, embeddingsModel, {
-      pineconeIndex,
-      maxConcurrency: 5,
-    });
-
-    // 4. (Optional) Log the memory event into Supabase PostgreSQL
-    /*
-    await supabase.from("memory_events").insert({
-      user_id: user.id,
-      title: `Ingested ${file.name}`,
-      description: `Parsed ${splitDocs.length} chunks from ${file.name}.`,
-      event_type: "ingestion",
-    });
-    */
 
     return NextResponse.json({
       success: true,
-      message: `Successfully ingested ${file.name} into ${splitDocs.length} chunks.`,
+      message: "Ingestion pipeline triggered successfully.",
+      job: {
+        fileId,
+        status: "processing"
+      }
     });
 
   } catch (error: any) {
-    console.error("Ingestion error:", error);
+    console.error("Ingestion route API error:", error);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
