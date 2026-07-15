@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { MessageSquare, Send, Paperclip, Bot, User, Loader2 } from "lucide-react";
+import { createClient } from "@/lib/supabase/client";
 
 type Message = {
   role: "user" | "ai";
@@ -18,6 +19,53 @@ export default function ChatInterface() {
   ]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [conversationId, setConversationId] = useState<string | null>(null);
+
+  const supabase = createClient();
+
+  useEffect(() => {
+    const loadConversation = async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+
+        // Get latest conversation
+        const { data: convs, error: convErr } = await supabase
+          .from("conversations")
+          .select("id")
+          .order("created_at", { ascending: false })
+          .limit(1);
+
+        if (convErr) throw convErr;
+
+        if (convs && convs.length > 0) {
+          const activeConvId = convs[0].id;
+          setConversationId(activeConvId);
+
+          // Get messages
+          const { data: msgs, error: msgsErr } = await supabase
+            .from("messages")
+            .select("role, content, citations")
+            .eq("conversation_id", activeConvId)
+            .order("created_at", { ascending: true });
+
+          if (msgsErr) throw msgsErr;
+
+          if (msgs && msgs.length > 0) {
+            setMessages(msgs.map((m: any) => ({
+              role: m.role === "assistant" ? "ai" : m.role,
+              content: m.content,
+              citations: m.citations || []
+            })));
+          }
+        }
+      } catch (err) {
+        console.error("Error loading chat history:", err);
+      }
+    };
+
+    loadConversation();
+  }, []);
 
   const sendMessage = async () => {
     if (!input.trim() || isLoading) return;
@@ -31,12 +79,20 @@ export default function ChatInterface() {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: userMessage.content, history: messages }),
+        body: JSON.stringify({ 
+          message: userMessage.content, 
+          history: messages,
+          conversationId: conversationId 
+        }),
       });
 
       const data = await res.json();
       
       if (!res.ok) throw new Error(data.error || "Failed to fetch response");
+
+      if (data.conversationId) {
+        setConversationId(data.conversationId);
+      }
 
       setMessages((prev) => [
         ...prev,

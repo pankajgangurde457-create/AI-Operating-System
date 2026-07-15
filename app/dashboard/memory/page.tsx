@@ -1,6 +1,8 @@
 "use client";
 
-import { BrainCircuit, GitCommit, Search, Sparkles, Database } from "lucide-react";
+import { useState, useEffect } from "react";
+import { BrainCircuit, GitCommit, Search, Sparkles, Database, Loader2 } from "lucide-react";
+import { createClient } from "@/lib/supabase/client";
 
 const memoryEvents = [
   {
@@ -30,6 +32,31 @@ const memoryEvents = [
 ];
 
 export default function MemoryTimeline() {
+  const [events, setEvents] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const supabase = createClient();
+
+  useEffect(() => {
+    const fetchEvents = async () => {
+      try {
+        setIsLoading(true);
+        const { data, error } = await supabase
+          .from("memory_events")
+          .select("*")
+          .order("created_at", { ascending: false });
+
+        if (error) throw error;
+        setEvents(data || []);
+      } catch (err) {
+        console.error("Error fetching memory timeline events:", err);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchEvents();
+  }, []);
+
   return (
     <div className="flex-1 flex flex-col p-8 max-w-4xl mx-auto w-full pb-24">
       <header className="flex flex-col gap-2 mb-12">
@@ -42,24 +69,38 @@ export default function MemoryTimeline() {
 
       {/* Timeline */}
       <div className="relative border-l border-border-glass ml-4 sm:ml-8 pl-8 flex flex-col gap-12">
-        
-        {memoryEvents.map((event, i) => {
+        {isLoading ? (
+          <div className="text-center py-6 text-text-secondary font-mono text-sm">
+            <Loader2 className="w-5 h-5 animate-spin mx-auto mb-2 text-white" />
+            Loading timeline...
+          </div>
+        ) : events.length === 0 ? (
+          <div className="text-center py-6 text-text-secondary font-mono text-sm border border-dashed border-border-glass rounded-xl bg-white/5 p-6">
+            No dynamic events found. Showing baseline memory:
+          </div>
+        ) : null}
+
+        {(events.length > 0 ? events : memoryEvents).map((event, i) => {
           let Icon = GitCommit;
           let iconColor = "text-text-secondary";
           
-          if (event.type === "synthesis") {
+          if (event.event_type === "synthesis" || event.type === "synthesis") {
             Icon = Sparkles;
             iconColor = "text-purple-400";
-          } else if (event.type === "ingestion") {
+          } else if (event.event_type === "ingestion" || event.type === "ingestion") {
             Icon = Database;
             iconColor = "text-blue-400";
-          } else if (event.type === "recall") {
+          } else if (event.event_type === "recall" || event.type === "recall") {
             Icon = Search;
             iconColor = "text-green-400";
           }
 
+          const date = event.created_at
+            ? new Date(event.created_at).toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" })
+            : event.date;
+
           return (
-            <div key={i} className="relative group">
+            <div key={event.id || i} className="relative group">
               {/* Timeline Node */}
               <div className="absolute -left-[41px] top-1 w-6 h-6 rounded-full bg-black border border-border-glass flex items-center justify-center group-hover:border-white/50 transition-colors z-10">
                 <Icon className={`w-3 h-3 ${iconColor}`} />
@@ -67,7 +108,7 @@ export default function MemoryTimeline() {
               
               {/* Content */}
               <div className="flex flex-col gap-2">
-                <span className="text-[10px] font-mono tracking-widest text-text-secondary uppercase">{event.date}</span>
+                <span className="text-[10px] font-mono tracking-widest text-text-secondary uppercase">{date}</span>
                 <h3 className="text-lg font-medium text-white">{event.title}</h3>
                 <div className="glass-card p-4 rounded-xl border border-border-glass text-sm text-text-secondary leading-relaxed mt-2 shadow-lg">
                   {event.description}

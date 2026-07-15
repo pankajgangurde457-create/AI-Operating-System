@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Database, UploadCloud, Search, FileText, Image as ImageIcon, Music, MoreVertical, Loader2 } from "lucide-react";
+import { createClient } from "@/lib/supabase/client";
 
 const mockFiles = [
   { name: "Q3_Financial_Report.pdf", type: "PDF", size: "2.4 MB", date: "Oct 12, 2026", icon: FileText },
@@ -16,6 +17,31 @@ export default function KnowledgeBase() {
   const [isUploading, setIsUploading] = useState(false);
   const [uploadStatus, setUploadStatus] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const [files, setFiles] = useState<any[]>([]);
+  const [isLoadingFiles, setIsLoadingFiles] = useState(true);
+  const supabase = createClient();
+
+  const fetchFiles = async () => {
+    try {
+      setIsLoadingFiles(true);
+      const { data, error } = await supabase
+        .from("files")
+        .select("*")
+        .order("created_at", { ascending: false });
+
+      if (error) throw error;
+      setFiles(data || []);
+    } catch (err) {
+      console.error("Error fetching files from Supabase:", err);
+    } finally {
+      setIsLoadingFiles(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchFiles();
+  }, []);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -39,6 +65,7 @@ export default function KnowledgeBase() {
       
       setUploadStatus(`Success: ${data.message}`);
       if (fileInputRef.current) fileInputRef.current.value = "";
+      await fetchFiles();
     } catch (error: any) {
       setUploadStatus(`Error: ${error.message} (Are API keys set up?)`);
     } finally {
@@ -112,10 +139,40 @@ export default function KnowledgeBase() {
 
       {/* Grid View */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-        {mockFiles.map((file, i) => {
-          const Icon = file.icon;
+        {isLoadingFiles ? (
+          <div className="col-span-full text-center py-12 text-text-secondary font-mono text-sm">
+            <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2 text-white" />
+            Loading knowledge base...
+          </div>
+        ) : files.length === 0 ? (
+          <div className="col-span-full text-center py-12 text-text-secondary font-mono text-sm border border-dashed border-border-glass rounded-xl bg-white/5">
+            No dynamic files found. Showing mock system baseline:
+          </div>
+        ) : null}
+
+        {(files.length > 0 ? files : mockFiles).map((file, i) => {
+          let Icon = FileText;
+          let typeLabel = "TXT";
+          
+          if (file.file_type === "application/pdf" || file.type === "PDF") {
+            Icon = FileText;
+            typeLabel = "PDF";
+          } else if (file.file_type?.startsWith("image/") || file.type === "IMAGE") {
+            Icon = ImageIcon;
+            typeLabel = "IMAGE";
+          } else if (file.file_type?.startsWith("audio/") || file.type === "AUDIO") {
+            Icon = Music;
+            typeLabel = "AUDIO";
+          }
+
+          const name = file.file_name || file.name;
+          const size = file.file_size || file.size;
+          const date = file.created_at 
+            ? new Date(file.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) 
+            : file.date;
+
           return (
-            <div key={i} className="glass-card rounded-xl border border-border-glass p-5 flex flex-col gap-4 group hover:border-white/20 transition-colors relative overflow-hidden cursor-pointer">
+            <div key={file.id || i} className="glass-card rounded-xl border border-border-glass p-5 flex flex-col gap-4 group hover:border-white/20 transition-colors relative overflow-hidden cursor-pointer">
               <div className="flex justify-between items-start z-10">
                 <div className="w-10 h-10 rounded-lg bg-white/10 flex items-center justify-center group-hover:scale-110 transition-transform">
                   <Icon className="w-5 h-5 text-white/80" />
@@ -126,16 +183,16 @@ export default function KnowledgeBase() {
               </div>
               
               <div className="flex flex-col gap-1 z-10 mt-2">
-                <h3 className="text-sm font-medium text-white truncate" title={file.name}>{file.name}</h3>
+                <h3 className="text-sm font-medium text-white truncate" title={name}>{name}</h3>
                 <div className="flex items-center gap-3 text-xs font-mono text-text-secondary tracking-wider">
-                  <span>{file.type}</span>
+                  <span>{typeLabel}</span>
                   <span className="w-1 h-1 rounded-full bg-border-glass"></span>
-                  <span>{file.size}</span>
+                  <span>{size}</span>
                 </div>
               </div>
               
               <div className="mt-2 text-[10px] font-mono text-text-secondary uppercase tracking-widest pt-4 border-t border-border-glass z-10">
-                Ingested {file.date}
+                Ingested {date}
               </div>
 
               {/* Hover effect background */}
