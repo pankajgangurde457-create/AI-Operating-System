@@ -1,11 +1,11 @@
 'use client'
 
 import { useState } from 'react'
-import { login } from './actions'
+import { signup } from '../login/actions'
 import { Lock, Mail, ArrowRight, Loader2, KeyRound } from 'lucide-react'
 import Link from 'next/link'
 
-export default function LoginPage() {
+export default function SignupPage() {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -17,7 +17,7 @@ export default function LoginPage() {
     const formData = new FormData(e.currentTarget)
     
     try {
-      const result = await login(formData)
+      const result = await signup(formData)
       if (result?.error) {
         setError(result.error)
       }
@@ -45,10 +45,10 @@ export default function LoginPage() {
         </div>
 
         <h1 className="text-2xl font-bold text-center mb-2">
-          Welcome Back
+          Initialize System
         </h1>
         <p className="text-sm text-text-secondary text-center mb-8">
-          Enter your credentials to access your OS
+          Create your Personal Knowledge OS account
         </p>
 
         {error && (
@@ -97,17 +97,17 @@ export default function LoginPage() {
             className="mt-4 flex items-center justify-center gap-2 w-full bg-white text-black py-3 rounded-lg font-medium hover:bg-gray-200 transition-colors disabled:opacity-50"
           >
             {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-            Authenticate
+            Create Account
             {!isLoading && <ArrowRight className="w-4 h-4" />}
           </button>
         </form>
 
         <div className="mt-6 text-center">
           <Link 
-            href="/signup"
+            href="/login"
             className="text-xs text-text-secondary hover:text-white transition-colors"
           >
-            Don't have an account? Sign Up
+            Already initialized? Authenticate
           </Link>
         </div>
       </div>
