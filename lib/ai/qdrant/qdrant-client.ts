@@ -71,3 +71,19 @@ async function assertCollection(qdrant: QdrantClient, name: string, vectorSize: 
     console.error(`Failed to initialize Qdrant collection "${name}":`, error);
   }
 }
+
+let collectionsInitialized = false;
+let initPromise: Promise<void> | null = null;
+
+export async function ensureCollectionsInitialized(): Promise<void> {
+  if (collectionsInitialized) return;
+  if (!initPromise) {
+    initPromise = initQdrantCollections().then(() => {
+      collectionsInitialized = true;
+    }).catch(err => {
+      initPromise = null;
+      throw err;
+    });
+  }
+  return initPromise;
+}

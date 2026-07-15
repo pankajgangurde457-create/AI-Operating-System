@@ -1,5 +1,5 @@
 import { getAIProvider } from "../providers/factory";
-import { getQdrantClient, KNOWLEDGE_COLLECTION } from "../qdrant/qdrant-client";
+import { getQdrantClient, KNOWLEDGE_COLLECTION, ensureCollectionsInitialized } from "../qdrant/qdrant-client";
 import { getSupabaseAdmin } from "../../supabase/admin";
 
 export interface DocumentSummary {
@@ -28,6 +28,7 @@ export async function summarizeDocument(fileId: string): Promise<DocumentSummary
   console.log(`[Summarizer] Cache miss for file ${fileId}. Initiating summarization...`);
 
   // 2. Fetch all chunks from Qdrant
+  await ensureCollectionsInitialized();
   const qdrant = getQdrantClient();
   const response = await qdrant.scroll(KNOWLEDGE_COLLECTION, {
     filter: {

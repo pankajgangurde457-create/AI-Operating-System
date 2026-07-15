@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import { getAIProvider, getEmbeddingProvider } from "../providers/factory";
-import { getQdrantClient, KNOWLEDGE_COLLECTION } from "../qdrant/qdrant-client";
+import { getQdrantClient, KNOWLEDGE_COLLECTION, ensureCollectionsInitialized } from "../qdrant/qdrant-client";
 import { chunkDocumentBlocks, InputDocumentBlock } from "./chunker";
 import { parsePdfWithPages } from "./pdf-helper"; // Separated to keep imports tidy
 import { getSupabaseAdmin } from "../../supabase/admin";
@@ -148,6 +148,7 @@ export async function runIngestionPipeline(job: IngestionJob): Promise<void> {
 
     // 5. Upsert to Qdrant
     await updateStatus("processing", "Uploading vectors to Qdrant vector database...");
+    await ensureCollectionsInitialized();
     const qdrant = getQdrantClient();
     
     // Qdrant upsert payload

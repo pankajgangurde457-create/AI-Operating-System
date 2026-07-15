@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import { getAIProvider, getEmbeddingProvider } from "../providers/factory";
-import { getQdrantClient, MEMORY_COLLECTION } from "../qdrant/qdrant-client";
+import { getQdrantClient, MEMORY_COLLECTION, ensureCollectionsInitialized } from "../qdrant/qdrant-client";
 import { ChatMessage } from "../providers/AIProvider";
 import { getSupabaseAdmin } from "../../supabase/admin";
 
@@ -27,7 +27,7 @@ export async function getShortTermMemory(conversationId: string, limit = 10): Pr
     }
 
     // Reverse to chronological order (system/user/assistant sequence)
-    return data.reverse().map(m => ({
+    return data.reverse().map((m: any) => ({
       role: m.role as "user" | "assistant" | "system",
       content: m.content,
     }));
@@ -42,6 +42,7 @@ export async function getShortTermMemory(conversationId: string, limit = 10): Pr
  */
 export async function getLongTermMemories(query: string, userId: string, limit = 3): Promise<LongTermMemory[]> {
   try {
+    await ensureCollectionsInitialized();
     const qdrant = getQdrantClient();
     const embeddingProvider = getEmbeddingProvider();
 
@@ -86,7 +87,7 @@ export async function distillSessionMemory(conversationId: string, userId: strin
     }
 
     const conversationText = messages
-      .map(m => `${m.role.toUpperCase()}: ${m.content}`)
+      .map((m: any) => `${m.role.toUpperCase()}: ${m.content}`)
       .join("\n\n");
 
     // 2. Use a cheap model call to extract atomic user facts
@@ -119,6 +120,7 @@ ${conversationText}`;
       return [];
     }
 
+    await ensureCollectionsInitialized();
     const qdrant = getQdrantClient();
     const embeddingProvider = getEmbeddingProvider();
     const newlyStoredFacts: string[] = [];

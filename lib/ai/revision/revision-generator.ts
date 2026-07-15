@@ -1,5 +1,5 @@
 import { getAIProvider } from "../providers/factory";
-import { getQdrantClient, KNOWLEDGE_COLLECTION } from "../qdrant/qdrant-client";
+import { getQdrantClient, KNOWLEDGE_COLLECTION, ensureCollectionsInitialized } from "../qdrant/qdrant-client";
 import { retrieve } from "../retrieval/rag-retriever";
 import { getSupabaseAdmin } from "../../supabase/admin";
 
@@ -43,6 +43,7 @@ export async function generateRevisionNotes(
 
     // Scroll all chunks for this file from Qdrant
     console.log(`[Revision Notes] Cache miss for fileId: ${fileId}. Loading chunks...`);
+    await ensureCollectionsInitialized();
     const qdrant = getQdrantClient();
     const response = await qdrant.scroll(KNOWLEDGE_COLLECTION, {
       filter: {

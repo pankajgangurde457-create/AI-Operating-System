@@ -1,49 +1,78 @@
 import { NextResponse } from "next/server";
 import { runIngestionPipeline } from "@/lib/ai/ingestion/pipeline";
-import { createClient } from "@supabase/supabase-js";
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-const supabaseServiceRole = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
-const supabaseAdmin = createClient(supabaseUrl, supabaseServiceRole);
+import { getSupabaseAdmin } from "@/lib/supabase/admin";
+import { createClient } from "@/lib/supabase/server";
+import crypto from "crypto";
 
 /**
  * Next.js API Route Handler to trigger the Ingestion Pipeline.
- * Expects a JSON payload containing the Supabase Storage file reference and user metadata.
- * Runs the processing pipeline asynchronously.
+ * Expects a multipart/form-data payload containing the uploaded file.
+ * Automatically handles uploading to Supabase Storage and database indexing.
  */
 export async function POST(req: Request) {
   try {
-    const body = await req.json();
-    const { fileId, userId, storagePath, mimeType, fileName } = body;
+    // 1. Authenticate user from session
+    const supabase = createClient();
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
 
-    // Validate parameters
-    if (!fileId || !userId || !storagePath || !mimeType || !fileName) {
-      return NextResponse.json(
-        { error: "Missing required parameters: fileId, userId, storagePath, mimeType, fileName" },
-        { status: 400 }
-      );
+    if (authError || !user) {
+      return NextResponse.json({ error: "Unauthorized. Please authenticate first." }, { status: 401 });
     }
 
-    // Assert that the file metadata record exists in the files table
-    const { data: fileRecord, error: fileError } = await supabaseAdmin
-      .from("files")
-      .select("id")
-      .eq("id", fileId)
-      .maybeSingle();
+    const userId = user.id;
 
-    if (fileError || !fileRecord) {
-      // If the file row doesn't exist, create it so status updates can be tracked
-      await supabaseAdmin.from("files").insert({
+    // 2. Parse Multipart Form Data
+    const formData = await req.formData();
+    const file = formData.get("file") as File | null;
+
+    if (!file) {
+      return NextResponse.json({ error: "Missing required file parameter." }, { status: 400 });
+    }
+
+    const fileName = file.name;
+    const mimeType = file.type || "application/octet-stream";
+    const fileSize = file.size;
+    const buffer = Buffer.from(await file.arrayBuffer());
+
+    const fileId = crypto.randomUUID();
+    const storagePath = `${userId}/${fileId}/${fileName}`;
+
+    // 3. Upload File to Supabase Storage Bucket
+    const { error: uploadError } = await getSupabaseAdmin()
+      .storage
+      .from("knowledge_base")
+      .upload(storagePath, buffer, {
+        contentType: mimeType,
+        upsert: true
+      });
+
+    if (uploadError) {
+      console.error("Supabase storage upload error:", uploadError);
+      return NextResponse.json({ error: `Storage upload failed: ${uploadError.message}` }, { status: 500 });
+    }
+
+    // 4. Create metadata row in files table with 'pending' status
+    const { data: fileRecord, error: fileError } = await getSupabaseAdmin()
+      .from("files")
+      .insert({
         id: fileId,
         user_id: userId,
         file_name: fileName,
         file_type: mimeType,
+        file_size: `${(fileSize / (1024 * 1024)).toFixed(2)} MB`,
         storage_path: storagePath,
-        status: "pending"
-      });
+        status: "pending",
+        status_message: "Ingestion pipeline queued."
+      })
+      .select("id")
+      .single();
+
+    if (fileError) {
+      console.error("Database insert error:", fileError);
+      return NextResponse.json({ error: `Database insert failed: ${fileError.message}` }, { status: 500 });
     }
 
-    // Trigger the ingestion pipeline in the background
+    // 5. Trigger the ingestion pipeline asynchronously in the background
     runIngestionPipeline({
       fileId,
       userId,
@@ -57,14 +86,15 @@ export async function POST(req: Request) {
     return NextResponse.json({
       success: true,
       message: "Ingestion pipeline triggered successfully.",
-      job: {
-        fileId,
+      file: {
+        id: fileId,
+        name: fileName,
         status: "processing"
       }
     });
 
   } catch (error: any) {
     console.error("Ingestion route API error:", error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ error: error.message || "An unexpected error occurred." }, { status: 500 });
   }
 }

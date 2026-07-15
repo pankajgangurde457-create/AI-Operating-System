@@ -1,5 +1,5 @@
 import { getEmbeddingProvider, getAIProvider } from "../providers/factory";
-import { getQdrantClient, KNOWLEDGE_COLLECTION } from "../qdrant/qdrant-client";
+import { getQdrantClient, KNOWLEDGE_COLLECTION, ensureCollectionsInitialized } from "../qdrant/qdrant-client";
 
 export interface RetrievalFilters {
   fileId?: string;
@@ -78,6 +78,7 @@ export async function retrieve(
   filters?: RetrievalFilters,
   topK = 5
 ): Promise<RetrievalResult[]> {
+  await ensureCollectionsInitialized();
   const qdrant = getQdrantClient();
   const embeddingProvider = getEmbeddingProvider();
 

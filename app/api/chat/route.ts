@@ -4,6 +4,7 @@ import { retrieve, Citation } from "@/lib/ai/retrieval/rag-retriever";
 import { getShortTermMemory, getLongTermMemories, distillSessionMemory } from "@/lib/ai/memory/memory-manager";
 import { ChatMessage } from "@/lib/ai/providers/AIProvider";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
+import { createClient } from "@/lib/supabase/server";
 
 const CHARACTER_BUDGET = 24000; // ~6000 tokens (4 chars/token) for prompt safety
 
@@ -92,10 +93,22 @@ export function buildPromptAndCitations(
  */
 export async function POST(req: Request) {
   try {
-    const { message, conversationId, userId } = await req.json();
+    // 1. Authenticate user from session
+    const supabase = createClient();
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
 
-    if (!message || !userId) {
-      return NextResponse.json({ error: "Missing required parameters: message, userId" }, { status: 400 });
+    if (authError || !user) {
+      return NextResponse.json({ error: "Unauthorized. Please authenticate first." }, { status: 401 });
+    }
+
+    const userId = user.id;
+
+    // 2. Parse request body
+    const body = await req.json();
+    const { message, conversationId, stream: requestStream } = body;
+
+    if (!message) {
+      return NextResponse.json({ error: "Missing required parameter: message" }, { status: 400 });
     }
 
     // Determine or create active conversation
@@ -113,17 +126,26 @@ export async function POST(req: Request) {
       activeConversationId = conv.id;
     }
 
-    // 1. Retrieve knowledge chunks (RAG)
+    // 3. Retrieve knowledge chunks (RAG)
     const retrievedChunks = await retrieve(message, userId, undefined, 5);
 
-    // 2. Retrieve relevant long-term memories
+    // 4. Retrieve relevant long-term memories
     const relevantMemories = await getLongTermMemories(message, userId, 3);
     const memoriesList = relevantMemories.map(m => m.text);
 
-    // 3. Retrieve short-term chat history (last 8 turns)
-    const shortTermHistory = await getShortTermMemory(activeConversationId, 8);
+    // 5. Retrieve short-term chat history (last 8 turns)
+    const rawHistory = body.history || [];
+    let shortTermHistory: ChatMessage[] = [];
+    if (rawHistory.length > 0) {
+      shortTermHistory = rawHistory.map((h: any) => ({
+        role: h.role === "ai" ? "assistant" : h.role,
+        content: h.content,
+      }));
+    } else {
+      shortTermHistory = await getShortTermMemory(activeConversationId, 8);
+    }
 
-    // 4. Construct prompt with token budgeting
+    // 6. Construct prompt with token budgeting
     const { messages: promptMessages, activeCitations } = buildPromptAndCitations(
       "", // System instructions are generated inside buildPromptAndCitations
       memoriesList,
@@ -132,86 +154,132 @@ export async function POST(req: Request) {
       message
     );
 
-    // 5. Initialize streaming response using line-delimited JSON
-    const encoder = new TextEncoder();
-    const customStream = new ReadableStream({
-      async start(controller) {
-        // First chunk sends metadata (conversationId and citations)
-        const metadataChunk = {
-          type: "metadata",
-          conversationId: activeConversationId,
-          citations: activeCitations.map((c, i) => ({
-            sourceIndex: i + 1,
-            fileName: c.fileName,
-            pageOrTimestamp: c.pageOrTimestamp,
-            contentSnippet: c.text.substring(0, 100) + "...",
-          })),
-        };
-        controller.enqueue(encoder.encode(JSON.stringify(metadataChunk) + "\n"));
+    const isStreamingRequested = requestStream === true;
 
-        // Call the AI provider streaming endpoint
-        const aiProvider = getAIProvider() as any;
-        let accumulatedText = "";
-
-        try {
-          const stream = await aiProvider.chatStream(promptMessages, { temperature: 0.3 });
-          
-          for await (const chunk of stream) {
-            accumulatedText += chunk;
-            const textChunk = {
-              type: "text",
-              content: chunk,
-            };
-            controller.enqueue(encoder.encode(JSON.stringify(textChunk) + "\n"));
-          }
-
-          // 6. Write messages to database
-          // Insert User message
-          await getSupabaseAdmin().from("messages").insert({
-            conversation_id: activeConversationId,
-            role: "user",
-            content: message,
-          });
-
-          // Insert Assistant message with citations
-          await getSupabaseAdmin().from("messages").insert({
-            conversation_id: activeConversationId,
-            role: "assistant",
-            content: accumulatedText,
-            citations: activeCitations.map(c => ({
+    if (isStreamingRequested) {
+      // Initialize streaming response using line-delimited JSON
+      const encoder = new TextEncoder();
+      const customStream = new ReadableStream({
+        async start(controller) {
+          // First chunk sends metadata (conversationId and citations)
+          const metadataChunk = {
+            type: "metadata",
+            conversationId: activeConversationId,
+            citations: activeCitations.map((c, i) => ({
+              sourceIndex: i + 1,
               fileName: c.fileName,
-              chunkIndex: c.chunkIndex,
               pageOrTimestamp: c.pageOrTimestamp,
               contentSnippet: c.text.substring(0, 100) + "...",
             })),
-          });
+          };
+          controller.enqueue(encoder.encode(JSON.stringify(metadataChunk) + "\n"));
 
-          // 7. Trigger long-term memory synthesis asynchronously in the background
-          distillSessionMemory(activeConversationId, userId).catch(err => {
-            console.error(`[Background Memory Distill Error] Conv ID ${activeConversationId}:`, err);
-          });
+          // Call the AI provider streaming endpoint
+          const aiProvider = getAIProvider() as any;
+          let accumulatedText = "";
 
-          const doneChunk = { type: "done" };
-          controller.enqueue(encoder.encode(JSON.stringify(doneChunk) + "\n"));
-          controller.close();
-        } catch (streamErr: any) {
-          console.error("Streaming error during chat:", streamErr);
-          const errorChunk = { type: "error", message: streamErr?.message || "Streaming failed" };
-          controller.enqueue(encoder.encode(JSON.stringify(errorChunk) + "\n"));
-          controller.close();
-        }
-      },
-    });
+          try {
+            const stream = await aiProvider.chatStream(promptMessages, { temperature: 0.3 });
+            
+            for await (const chunk of stream) {
+              accumulatedText += chunk;
+              const textChunk = {
+                type: "text",
+                content: chunk,
+              };
+              controller.enqueue(encoder.encode(JSON.stringify(textChunk) + "\n"));
+            }
 
-    return new Response(customStream, {
-      headers: {
-        "Content-Type": "application/x-ndjson",
-        "Transfer-Encoding": "chunked",
-      },
-    });
+            // Write messages to database
+            // Insert User message
+            await getSupabaseAdmin().from("messages").insert({
+              conversation_id: activeConversationId,
+              role: "user",
+              content: message,
+            });
+
+            // Insert Assistant message with citations
+            await getSupabaseAdmin().from("messages").insert({
+              conversation_id: activeConversationId,
+              role: "assistant",
+              content: accumulatedText,
+              citations: activeCitations.map(c => ({
+                fileName: c.fileName,
+                chunkIndex: c.chunkIndex,
+                pageOrTimestamp: c.pageOrTimestamp,
+                contentSnippet: c.text.substring(0, 100) + "...",
+              })),
+            });
+
+            // Trigger long-term memory synthesis asynchronously in the background
+            distillSessionMemory(activeConversationId, userId).catch(err => {
+              console.error(`[Background Memory Distill Error] Conv ID ${activeConversationId}:`, err);
+            });
+
+            const doneChunk = { type: "done" };
+            controller.enqueue(encoder.encode(JSON.stringify(doneChunk) + "\n"));
+            controller.close();
+          } catch (streamErr: any) {
+            console.error("Streaming error during chat:", streamErr);
+            const errorChunk = { type: "error", message: streamErr?.message || "Streaming failed" };
+            controller.enqueue(encoder.encode(JSON.stringify(errorChunk) + "\n"));
+            controller.close();
+          }
+        },
+      });
+
+      return new Response(customStream, {
+        headers: {
+          "Content-Type": "application/x-ndjson",
+          "Transfer-Encoding": "chunked",
+        },
+      });
+    } else {
+      // Non-streaming JSON response (Default/Fallback for frontend client compatibility)
+      const aiProvider = getAIProvider();
+      const chatResponse = await aiProvider.chat(promptMessages, { temperature: 0.3 });
+      const answer = chatResponse.text;
+
+      // Write messages to database
+      // Insert User message
+      await getSupabaseAdmin().from("messages").insert({
+        conversation_id: activeConversationId,
+        role: "user",
+        content: message,
+      });
+
+      // Insert Assistant message with citations
+      await getSupabaseAdmin().from("messages").insert({
+        conversation_id: activeConversationId,
+        role: "assistant",
+        content: answer,
+        citations: activeCitations.map(c => ({
+          fileName: c.fileName,
+          chunkIndex: c.chunkIndex,
+          pageOrTimestamp: c.pageOrTimestamp,
+          contentSnippet: c.text.substring(0, 100) + "...",
+        })),
+      });
+
+      // Trigger long-term memory synthesis asynchronously in the background
+      distillSessionMemory(activeConversationId, userId).catch(err => {
+        console.error(`[Background Memory Distill Error] Conv ID ${activeConversationId}:`, err);
+      });
+
+      return NextResponse.json({
+        answer,
+        citations: activeCitations.map((c, i) => ({
+          sourceIndex: i + 1,
+          fileName: c.fileName,
+          pageOrTimestamp: c.pageOrTimestamp,
+          contentSnippet: c.text.substring(0, 100) + "...",
+        })),
+        conversationId: activeConversationId
+      });
+    }
 
   } catch (error: any) {
     console.error("Chat route API error:", error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ error: error.message || "An unexpected error occurred." }, { status: 500 });
   }
 }

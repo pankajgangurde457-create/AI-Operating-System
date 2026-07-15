@@ -1,6 +1,6 @@
 "use client";
 
-import { BrainCircuit, GitCommit, Search, Sparkles } from "lucide-react";
+import { BrainCircuit, GitCommit, Search, Sparkles, Database } from "lucide-react";
 
 const memoryEvents = [
   {

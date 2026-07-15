@@ -1,25 +1,19 @@
-import pdf from "pdf-parse";
+import { PDFParse } from "pdf-parse";
 import { InputDocumentBlock } from "./chunker";
 
 /**
- * Extracts text from a PDF buffer page-by-page using pdf-parse's pagerender callback.
+ * Extracts text from a PDF buffer page-by-page using pdf-parse's modern PDFParse class.
  */
 export async function parsePdfWithPages(buffer: Buffer): Promise<InputDocumentBlock[]> {
-  const pages: InputDocumentBlock[] = [];
-  let pageNum = 0;
+  const parser = new PDFParse({ data: new Uint8Array(buffer) });
+  const result = await parser.getText();
 
-  const customPageRender = (pageData: any) => {
-    pageNum++;
-    const text = pageData.text || "";
-    pages.push({
-      text: text,
-      pageOrTimestamp: `Page ${pageNum}`,
-    });
-    return text;
-  };
+  if (!result || !result.pages) {
+    return [];
+  }
 
-  // Run pdf-parse with custom renderer
-  await pdf(buffer, { pagerender: customPageRender });
-
-  return pages;
+  return result.pages.map(page => ({
+    text: page.text || "",
+    pageOrTimestamp: `Page ${page.num}`,
+  }));
 }
