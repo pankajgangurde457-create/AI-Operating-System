@@ -18,12 +18,12 @@ export default function Navbar() {
       </div>
 
       <div className="flex items-center gap-4">
-        <button className="text-sm font-medium text-text-secondary hover:text-text-primary transition-colors">
+        <Link href="/login" className="text-sm font-medium text-text-secondary hover:text-text-primary transition-colors">
           Log in
-        </button>
-        <button className="px-4 py-2 text-sm font-medium bg-white text-black rounded-full hover:bg-gray-200 transition-colors shadow-[0_0_15px_rgba(255,255,255,0.3)]">
+        </Link>
+        <Link href="#access" className="px-4 py-2 text-sm font-medium bg-white text-black rounded-full hover:bg-gray-200 transition-colors shadow-[0_0_15px_rgba(255,255,255,0.3)]">
           Join Waitlist
-        </button>
+        </Link>
       </div>
     </nav>
   );

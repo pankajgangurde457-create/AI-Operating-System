@@ -40,12 +40,12 @@ export default function Hero() {
           </p>
           
           <div className="flex items-center gap-4 pt-4">
-            <button className="px-6 py-3 bg-white text-black font-medium rounded-full hover:scale-105 transition-transform shadow-[0_0_20px_rgba(255,255,255,0.2)]">
+            <a href="#access" className="px-6 py-3 bg-white text-black font-medium rounded-full hover:scale-105 transition-transform shadow-[0_0_20px_rgba(255,255,255,0.2)] text-center">
               Request Early Access
-            </button>
-            <button className="px-6 py-3 font-medium rounded-full border border-border-glass hover:bg-white/5 transition-colors">
+            </a>
+            <a href="#access" className="px-6 py-3 font-medium rounded-full border border-border-glass hover:bg-white/5 transition-colors text-center">
               Join Waitlist
-            </button>
+            </a>
           </div>
         </motion.div>
 
