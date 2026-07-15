@@ -58,8 +58,13 @@ export default function LoginPage() {
         </p>
 
         {error && (
-          <div className="mb-6 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm font-mono text-center">
-            {error}
+          <div className="mb-6 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm font-mono text-center flex flex-col gap-1">
+            <span>{error}</span>
+            {error.toLowerCase().includes("confirm") && (
+              <span className="text-[11px] text-text-secondary block mt-1 normal-case font-sans leading-relaxed">
+                Tip: Disable "Confirm email" in your Supabase Dashboard under Authentication ➡️ Providers ➡️ Email to allow direct logins without verification.
+              </span>
+            )}
           </div>
         )}
 
